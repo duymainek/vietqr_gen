@@ -1,0 +1,13 @@
+name: vietqr_example
+description: Example usage of the vietqr_gen package
+version: 1.0.0
+
+environment:
+  sdk: '>=2.17.0 <4.0.0'
+
+dependencies:
+  vietqr_gen:
+    path: ../
+
+dev_dependencies:
+  test: ^1.21.0
