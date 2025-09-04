@@ -54,7 +54,7 @@
 ///   print('Invalid VietQR payload: $e');
 /// }
 /// ```
-library vietqr_gen;
+library vietqr_generator;
 
 export 'src/vietqr.dart';
 export 'src/bank.dart';
