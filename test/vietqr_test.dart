@@ -171,4 +171,144 @@ void main() {
       expect(bins.length, equals(uniqueBins.length));
     });
   });
+
+  group('Custom BIN Tests', () {
+    test('should generate QR payload with custom BIN', () {
+      final payload = VietQR.generate(
+        accountNumber: '1234567890',
+        bankBin: '970999',
+      );
+
+      expect(payload, isNotEmpty);
+      expect(payload, startsWith('00020101021138'));
+      expect(payload, contains('970999')); // Custom BIN
+      expect(payload, contains('1234567890')); // Account number
+      expect(payload, contains('QRIBFTTA')); // Service code
+    });
+
+    test('should generate dynamic QR payload with custom BIN and amount', () {
+      final payload = VietQR.generate(
+        accountNumber: '9876543210',
+        bankBin: '970888',
+        amount: 250000.0,
+      );
+
+      expect(payload, isNotEmpty);
+      expect(payload, startsWith('00020101021238')); // Dynamic QR
+      expect(payload, contains('970888')); // Custom BIN
+      expect(payload, contains('9876543210')); // Account number
+      expect(payload, contains('250000')); // Amount
+    });
+
+    test(
+        'should generate dynamic QR payload with custom BIN, amount and message',
+        () {
+      final payload = VietQR.generate(
+        accountNumber: '5555555555',
+        bankBin: '970777',
+        amount: 75000.0,
+        message: 'Custom bank payment',
+      );
+
+      expect(payload, isNotEmpty);
+      expect(payload, startsWith('00020101021238')); // Dynamic QR
+      expect(payload, contains('970777')); // Custom BIN
+      expect(payload, contains('5555555555')); // Account number
+      expect(payload, contains('75000')); // Amount
+      expect(payload, contains('Custom bank payment')); // Message
+    });
+
+    test('should throw error when neither bank nor bankBin is provided', () {
+      expect(
+        () => VietQR.generate(accountNumber: '1234567890'),
+        throwsA(isA<ArgumentError>().having(
+          (e) => e.message,
+          'message',
+          'Either bank or bankBin must be provided',
+        )),
+      );
+    });
+
+    test('should throw error when both bank and bankBin are provided', () {
+      expect(
+        () => VietQR.generate(
+          bank: Bank.techcombank,
+          accountNumber: '1234567890',
+          bankBin: '970999',
+        ),
+        throwsA(isA<ArgumentError>().having(
+          (e) => e.message,
+          'message',
+          'Cannot provide both bank and bankBin parameters',
+        )),
+      );
+    });
+
+    test('should throw error when bankBin is empty', () {
+      expect(
+        () => VietQR.generate(
+          accountNumber: '1234567890',
+          bankBin: '',
+        ),
+        throwsA(isA<ArgumentError>().having(
+          (e) => e.message,
+          'message',
+          'Bank BIN cannot be empty',
+        )),
+      );
+    });
+
+    test('should throw error when bankBin is not 6 digits', () {
+      expect(
+        () => VietQR.generate(
+          accountNumber: '1234567890',
+          bankBin: '12345', // 5 digits
+        ),
+        throwsA(isA<ArgumentError>().having(
+          (e) => e.message,
+          'message',
+          'Bank BIN must be exactly 6 digits',
+        )),
+      );
+
+      expect(
+        () => VietQR.generate(
+          accountNumber: '1234567890',
+          bankBin: '1234567', // 7 digits
+        ),
+        throwsA(isA<ArgumentError>().having(
+          (e) => e.message,
+          'message',
+          'Bank BIN must be exactly 6 digits',
+        )),
+      );
+
+      expect(
+        () => VietQR.generate(
+          accountNumber: '1234567890',
+          bankBin: 'abc123', // contains letters
+        ),
+        throwsA(isA<ArgumentError>().having(
+          (e) => e.message,
+          'message',
+          'Bank BIN must be exactly 6 digits',
+        )),
+      );
+    });
+
+    test('should accept valid 6-digit BIN formats', () {
+      // Test various valid BIN formats
+      final validBins = ['970000', '970001', '999999', '000000'];
+
+      for (final bin in validBins) {
+        expect(
+          () => VietQR.generate(
+            accountNumber: '1234567890',
+            bankBin: bin,
+          ),
+          returnsNormally,
+        );
+      }
+    });
+  });
 }

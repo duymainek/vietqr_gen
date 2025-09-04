@@ -3,12 +3,13 @@
 [![pub package](https://img.shields.io/pub/v/vietqr_gen.svg)](https://pub.dev/packages/vietqr_gen)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A zero-dependency, type-safe Dart package for generating VietQR payload strings. This package strictly follows the **NAPAS 247** specification to create payloads for both **static** and **dynamic** QR codes, which can then be rendered by any QR code generation library (like `qr_flutter`).
+A zero-dependency, type-safe Dart package for generating and parsing VietQR payload strings. This package strictly follows the **NAPAS 247** specification to create and analyze payloads for both **static** and **dynamic** QR codes, which can then be rendered by any QR code generation library (like `qr_flutter`).
 
 ## Features
 
 - ✅ **NAPAS Compliant**: Follows the official specification for VietQR
 - 🔄 **Static & Dynamic QR**: Generate QR codes for both simple transfers (static) and transfers with a pre-filled amount and message (dynamic)
+- 🔍 **QR Parsing**: Parse and extract information from existing VietQR payloads (NEW!)
 - 🏦 **Comprehensive Bank List**: Includes a type-safe `Bank` enum for all major Vietnamese banks, preventing typos in bank names
 - 🔒 **Type-Safe**: Avoids common errors by using required parameters and enums
 - 🚀 **Lightweight**: No external dependencies
@@ -134,6 +135,41 @@ class PaymentQRScreen extends StatelessWidget {
   }
 }
 ```
+
+### 4. Parsing VietQR Payloads (NEW!)
+
+The package now supports parsing existing VietQR payloads to extract all the information:
+
+```dart
+// Parse a VietQR payload string
+try {
+  final parsedData = VietQR.parse(qrPayloadString);
+  
+  print('Bank: ${parsedData.bankName}');
+  print('Account: ${parsedData.accountNumber}');
+  print('Amount: ${parsedData.formattedAmount}');
+  print('Message: ${parsedData.message}');
+  print('Type: ${parsedData.isDynamic ? "Dynamic" : "Static"} QR');
+  
+  // Convert to Map for easy serialization
+  final dataMap = parsedData.toMap();
+  
+  // Get detailed information
+  print('Currency: ${parsedData.currency}');
+  print('Country: ${parsedData.countryCode}');
+  print('CRC: ${parsedData.crc}');
+  
+} catch (e) {
+  print('Invalid VietQR payload: $e');
+}
+```
+
+**Use Cases for Parsing:**
+- 🔍 **Payment Verification**: Verify QR codes before processing payments
+- 📊 **Data Extraction**: Extract transaction details from scanned QR codes
+- 🔄 **QR Code Migration**: Convert between different QR formats
+- 🛡️ **Security Validation**: Validate QR code integrity and authenticity
+- 📱 **QR Code Analysis**: Analyze and debug QR code generation
 
 ## Supported Banks
 

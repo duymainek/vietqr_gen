@@ -1,7 +1,7 @@
-import 'dart:convert';
 import 'bank.dart';
 import 'utils/crc16.dart';
 import 'utils/string_sanitizer.dart';
+import 'vietqr_parsed_data.dart';
 
 /// A class for generating VietQR payload strings according to NAPAS 247 specification.
 ///
@@ -36,34 +36,44 @@ class VietQR {
   /// Generates a VietQR payload string compliant with NAPAS 247 specification.
   ///
   /// Parameters:
-  /// - [bank]: The beneficiary bank from the [Bank] enum
+  /// - [bank]: The beneficiary bank from the [Bank] enum (optional if [bankBin] is provided)
   /// - [accountNumber]: The beneficiary's account number
   /// - [amount]: (Optional) The transaction amount in VND. If provided, creates a dynamic QR
   /// - [message]: (Optional) A message or purpose for the transaction
+  /// - [bankBin]: (Optional) Custom Bank Identification Number (6 digits). Use this for banks not in the [Bank] enum
   ///
   /// Returns a string that can be used to generate a QR code.
   ///
   /// Example:
   /// ```dart
-  /// // Static QR (user enters amount)
+  /// // Static QR using Bank enum (user enters amount)
   /// final payload = VietQR.generate(
   ///   bank: Bank.techcombank,
   ///   accountNumber: '9602091996',
   /// );
   ///
-  /// // Dynamic QR (pre-filled amount and message)
+  /// // Dynamic QR using Bank enum (pre-filled amount and message)
   /// final payload = VietQR.generate(
   ///   bank: Bank.mbBank,
   ///   accountNumber: '0962091996',
   ///   amount: 150000.0,
   ///   message: 'Thanh toan don hang',
   /// );
+  ///
+  /// // Using custom BIN for unsupported banks
+  /// final payload = VietQR.generate(
+  ///   accountNumber: '1234567890',
+  ///   bankBin: '970999', // Custom bank BIN
+  ///   amount: 100000.0,
+  ///   message: 'Payment to custom bank',
+  /// );
   /// ```
   static String generate({
-    required Bank bank,
+    Bank? bank,
     required String accountNumber,
     double? amount,
     String? message,
+    String? bankBin,
   }) {
     // Validate inputs
     if (accountNumber.isEmpty) {
@@ -72,6 +82,25 @@ class VietQR {
 
     if (amount != null && amount < 0) {
       throw ArgumentError('Amount must be greater than or equal to 0');
+    }
+
+    // Validate that either bank or bankBin is provided, but not both
+    if (bank == null && bankBin == null) {
+      throw ArgumentError('Either bank or bankBin must be provided');
+    }
+
+    if (bank != null && bankBin != null) {
+      throw ArgumentError('Cannot provide both bank and bankBin parameters');
+    }
+
+    // Validate custom BIN format if provided
+    if (bankBin != null) {
+      if (bankBin.isEmpty) {
+        throw ArgumentError('Bank BIN cannot be empty');
+      }
+      if (!RegExp(r'^\d{6}$').hasMatch(bankBin)) {
+        throw ArgumentError('Bank BIN must be exactly 6 digits');
+      }
     }
 
     final bool isDynamic = (amount != null && amount > 0) ||
@@ -88,7 +117,8 @@ class VietQR {
     payload.write(_buildTLV(_idPointOfInitiation, isDynamic ? '12' : '11'));
 
     // Field 38: Merchant Account Information
-    payload.write(_buildMerchantAccountInfo(bank.bin, accountNumber));
+    final binToUse = bank?.bin ?? bankBin!;
+    payload.write(_buildMerchantAccountInfo(binToUse, accountNumber));
 
     // Field 53: Transaction Currency (704 = Vietnamese Dong)
     payload.write(_buildTLV(_idTransactionCurrency, '704'));
@@ -171,5 +201,292 @@ class VietQR {
 
     // Wrap in the additional data field
     return _buildTLV(_idAdditionalData, purposeTLV);
+  }
+
+  /// Parses a VietQR payload string and extracts all the information.
+  ///
+  /// This method analyzes a VietQR payload string and returns a [VietQRParsedData]
+  /// object containing all the extracted information including bank details,
+  /// account number, amount, message, and other metadata.
+  ///
+  /// Parameters:
+  /// - [payload]: The VietQR payload string to parse
+  ///
+  /// Returns a [VietQRParsedData] object with all parsed information.
+  ///
+  /// Throws [FormatException] if the payload is malformed or invalid.
+  ///
+  /// Example:
+  /// ```dart
+  /// try {
+  ///   final parsedData = VietQR.parse('0002010102113802A000000727...');
+  ///   print('Bank: ${parsedData.bankName}');
+  ///   print('Account: ${parsedData.accountNumber}');
+  ///   print('Amount: ${parsedData.formattedAmount}');
+  /// } catch (e) {
+  ///   print('Invalid VietQR payload: $e');
+  /// }
+  /// ```
+  static VietQRParsedData parse(String payload) {
+    if (payload.isEmpty) {
+      throw FormatException('Payload cannot be empty');
+    }
+
+    // Validate CRC first
+    _validateCRC(payload);
+
+    final fields = <String, String>{};
+    int index = 0;
+
+    // Parse all TLV fields
+    while (index < payload.length - 4) {
+      final fieldId = payload.substring(index, index + 2);
+      final lengthStr = payload.substring(index + 2, index + 4);
+
+      if (!RegExp(r'^\d{2}$').hasMatch(lengthStr)) {
+        throw FormatException('Invalid length format at position $index');
+      }
+
+      final length = int.parse(lengthStr);
+
+      if (index + 4 + length > payload.length) {
+        throw FormatException('Field $fieldId extends beyond payload length');
+      }
+
+      final value = payload.substring(index + 4, index + 4 + length);
+      fields[fieldId] = value;
+
+      index += 4 + length;
+    }
+
+    // Extract and validate required fields
+    final payloadFormat = fields['00'] ?? '';
+    final pointOfInitiation = fields['01'] ?? '';
+    final merchantAccount = fields['38'] ?? '';
+    final currency = fields['53'] ?? '';
+    final amount = fields['54'];
+    final countryCode = fields['58'] ?? '';
+    final additionalData = fields['62'];
+    final crc = fields['63'] ?? '';
+
+    // Validate required fields
+    if (payloadFormat != '01') {
+      throw FormatException('Invalid payload format: $payloadFormat');
+    }
+
+    if (pointOfInitiation != '11' && pointOfInitiation != '12') {
+      throw FormatException('Invalid point of initiation: $pointOfInitiation');
+    }
+
+    if (currency != '704') {
+      throw FormatException('Invalid currency code: $currency');
+    }
+
+    if (countryCode != 'VN') {
+      throw FormatException('Invalid country code: $countryCode');
+    }
+
+    // Parse merchant account information
+    final merchantInfo = _parseMerchantAccountInfo(merchantAccount);
+
+    // Parse additional data (message)
+    String? message;
+    if (additionalData != null && additionalData.isNotEmpty) {
+      message = _parseAdditionalData(additionalData);
+    }
+
+    // Parse amount
+    double? parsedAmount;
+    if (amount != null && amount.isNotEmpty) {
+      try {
+        parsedAmount = double.parse(amount);
+      } catch (e) {
+        throw FormatException('Invalid amount format: $amount');
+      }
+    }
+
+    // Determine if dynamic QR
+    final isDynamic = pointOfInitiation == '12';
+
+    // Find matching bank
+    Bank? bank;
+    try {
+      bank = Bank.values.firstWhere(
+        (b) => b.bin == merchantInfo['bankBin'],
+        orElse: () => throw StateError('Bank not found'),
+      );
+    } catch (e) {
+      // Bank not found in enum, will be null
+    }
+
+    return VietQRParsedData(
+      bank: bank,
+      bankBin: merchantInfo['bankBin']!,
+      accountNumber: merchantInfo['accountNumber']!,
+      amount: parsedAmount,
+      message: message,
+      isDynamic: isDynamic,
+      payloadFormat: payloadFormat,
+      pointOfInitiation: pointOfInitiation,
+      currency: currency,
+      countryCode: countryCode,
+      crc: crc,
+    );
+  }
+
+  /// Validates the CRC checksum of the payload.
+  static void _validateCRC(String payload) {
+    if (payload.length < 8) {
+      throw FormatException('Payload too short to contain valid CRC');
+    }
+
+    // Extract CRC field (last 8 characters: 2 for field ID, 2 for length, 4 for CRC)
+    final crcField = payload.substring(payload.length - 8);
+    final crcFieldId = crcField.substring(0, 2);
+    final crcLength = crcField.substring(2, 4);
+    final providedCrc = crcField.substring(4, 8);
+
+    if (crcFieldId != '63') {
+      throw FormatException('Invalid CRC field ID: $crcFieldId');
+    }
+
+    if (crcLength != '04') {
+      throw FormatException('Invalid CRC length: $crcLength');
+    }
+
+    // Calculate expected CRC
+    final payloadWithoutCrc = payload.substring(0, payload.length - 4);
+    final expectedCrc = calculateCRC16(payloadWithoutCrc);
+
+    if (providedCrc != expectedCrc) {
+      throw FormatException(
+          'CRC checksum mismatch. Expected: $expectedCrc, Got: $providedCrc');
+    }
+  }
+
+  /// Parses the merchant account information field (ID 38).
+  static Map<String, String> _parseMerchantAccountInfo(String merchantAccount) {
+    if (merchantAccount.isEmpty) {
+      throw FormatException('Merchant account information is empty');
+    }
+
+    int index = 0;
+    String? bankBin;
+    String? accountNumber;
+
+    while (index < merchantAccount.length - 4) {
+      final subFieldId = merchantAccount.substring(index, index + 2);
+      final lengthStr = merchantAccount.substring(index + 2, index + 4);
+
+      if (!RegExp(r'^\d{2}$').hasMatch(lengthStr)) {
+        throw FormatException(
+            'Invalid sub-field length format at position $index');
+      }
+
+      final length = int.parse(lengthStr);
+
+      if (index + 4 + length > merchantAccount.length) {
+        throw FormatException(
+            'Sub-field $subFieldId extends beyond merchant account length');
+      }
+
+      final value = merchantAccount.substring(index + 4, index + 4 + length);
+
+      if (subFieldId == '01') {
+        // Beneficiary information - contains nested bank BIN and account number
+        final beneficiaryInfo = _parseBeneficiaryInfo(value);
+        bankBin = beneficiaryInfo['bankBin'];
+        accountNumber = beneficiaryInfo['accountNumber'];
+      }
+
+      index += 4 + length;
+    }
+
+    if (bankBin == null || accountNumber == null) {
+      throw FormatException(
+          'Could not extract bank BIN or account number from merchant account info');
+    }
+
+    return {
+      'bankBin': bankBin,
+      'accountNumber': accountNumber,
+    };
+  }
+
+  /// Parses the beneficiary information sub-field.
+  static Map<String, String> _parseBeneficiaryInfo(String beneficiaryInfo) {
+    int index = 0;
+    String? bankBin;
+    String? accountNumber;
+
+    while (index < beneficiaryInfo.length - 4) {
+      final subFieldId = beneficiaryInfo.substring(index, index + 2);
+      final lengthStr = beneficiaryInfo.substring(index + 2, index + 4);
+
+      if (!RegExp(r'^\d{2}$').hasMatch(lengthStr)) {
+        throw FormatException(
+            'Invalid beneficiary sub-field length format at position $index');
+      }
+
+      final length = int.parse(lengthStr);
+
+      if (index + 4 + length > beneficiaryInfo.length) {
+        throw FormatException(
+            'Beneficiary sub-field $subFieldId extends beyond length');
+      }
+
+      final value = beneficiaryInfo.substring(index + 4, index + 4 + length);
+
+      if (subFieldId == '00') {
+        bankBin = value;
+      } else if (subFieldId == '01') {
+        accountNumber = value;
+      }
+
+      index += 4 + length;
+    }
+
+    if (bankBin == null || accountNumber == null) {
+      throw FormatException(
+          'Could not extract bank BIN or account number from beneficiary info');
+    }
+
+    return {
+      'bankBin': bankBin,
+      'accountNumber': accountNumber,
+    };
+  }
+
+  /// Parses the additional data field (ID 62) to extract the message.
+  static String? _parseAdditionalData(String additionalData) {
+    int index = 0;
+
+    while (index < additionalData.length - 4) {
+      final subFieldId = additionalData.substring(index, index + 2);
+      final lengthStr = additionalData.substring(index + 2, index + 4);
+
+      if (!RegExp(r'^\d{2}$').hasMatch(lengthStr)) {
+        throw FormatException(
+            'Invalid additional data sub-field length format at position $index');
+      }
+
+      final length = int.parse(lengthStr);
+
+      if (index + 4 + length > additionalData.length) {
+        throw FormatException(
+            'Additional data sub-field $subFieldId extends beyond length');
+      }
+
+      final value = additionalData.substring(index + 4, index + 4 + length);
+
+      if (subFieldId == '08') {
+        // Purpose of transaction (message)
+        return value;
+      }
+
+      index += 4 + length;
+    }
+
+    return null;
   }
 }
