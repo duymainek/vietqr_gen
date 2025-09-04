@@ -1,6 +1,6 @@
 name: vietqr_gen
 description: A zero-dependency, type-safe Dart package for generating VietQR payload strings compliant with NAPAS 247 specification.
-version: 1.0.0
+version: 1.0.1
 homepage: https://github.com/duymainek/vietqr_gen
 
 environment:
