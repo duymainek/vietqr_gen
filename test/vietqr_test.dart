@@ -58,6 +58,18 @@ void main() {
       expect(payload, isNot(contains('Thanh toán đơn hàng')));
     });
 
+    test('should sanitize Vietnamese name in transfer message', () {
+      final payload = VietQR.generate(
+        bank: Bank.techcombank,
+        accountNumber: '1234567890',
+        amount: 25000.0,
+        message: 'Tô Thị Ánh Nguyệt chuyển khoản',
+      );
+
+      expect(payload, contains('To Thi Anh Nguyet chuyen khoan'));
+      expect(payload, isNot(contains('Tô Thị Ánh Nguyệt chuyển khoản')));
+    });
+
     test('should throw error for empty account number', () {
       expect(
         () => VietQR.generate(
